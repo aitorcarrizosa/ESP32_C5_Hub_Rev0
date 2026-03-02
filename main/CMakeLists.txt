@@ -9,4 +9,5 @@ idf_component_register(
         esp_http_client
         esp-tls
         mbedtls
+        led_init
 )

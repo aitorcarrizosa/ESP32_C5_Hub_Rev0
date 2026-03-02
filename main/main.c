@@ -16,6 +16,8 @@
 #include "esp_crt_bundle.h"
 #include "esp_netif_sntp.h"
 
+#include "led_init.h"
+
 // From your helper (keep the prototype here, no header needed)
 esp_err_t example_eth_init(esp_eth_handle_t **eth_handles_out, uint8_t *eth_port_cnt_out);
 
@@ -245,6 +247,10 @@ static void heartbeat_task(void *arg)
 
 void app_main(void)
 {
+    led_init();
+    led_set(LED_GRN, true);   // Turn on green LED
+    status_rgb_set(16, 0, 0);   // Turn on LED DevKit status RGB
+
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
@@ -308,4 +314,6 @@ void app_main(void)
 
     // 7) Start heartbeat task (waits for GOT_IP internally)
     xTaskCreate(heartbeat_task, "heartbeat_task", 16384, NULL, 5, NULL);
+
+
 }
