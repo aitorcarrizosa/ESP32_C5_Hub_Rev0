@@ -1,45 +1,50 @@
 menu "LED Configuration"
 
-    choice LED_STATUS_TYPE
-        prompt "Status RGB LED type"
-        default LED_STATUS_NONE
-        help
-            Select the status RGB LED implementation.
+choice LED_STATUS_TYPE
+    prompt "Status RGB LED type"
+    default LED_STATUS_NONE
+    help
+        Select the status RGB LED implementation.
 
-        config LED_STATUS_NONE
-            bool "None"
+    config LED_STATUS_NONE
+        bool "None"
 
-        config LED_STATUS_WS2812
-            bool "LED RGB (WS2812) ESP35-C5-DevKitC-1"
+    config LED_STATUS_WS2812
+        bool "DevKit WS2812 RGB (ESP32-C5-DevKitC-1)"
 
-    endchoice
+    config LED_STATUS_HUB_GPIO
+        bool "HUB discrete RGB (3 GPIO LEDs)"
+endchoice
 
-    config LED_STATUS_WS2812_GPIO
-        int "WS2812 data GPIO"
-        default 27
-        range -1 30
-        depends on LED_STATUS_WS2812
+config LED_STATUS_WS2812_GPIO
+    int "WS2812 data GPIO"
+    default 27
+    range -1 30
+    depends on LED_STATUS_WS2812
 
-    config LED_STATUS_WS2812_NUM_LEDS
-        int "WS2812 number of LEDs"
-        default 1
-        range 1 16
-        depends on LED_STATUS_WS2812
+config LED_STATUS_WS2812_NUM_LEDS
+    int "WS2812 number of LEDs"
+    default 1
+    range 1 16
+    depends on LED_STATUS_WS2812
 
-    # Tu RGB por MOSFET (dumb)
-    config LED_GRN_GPIO
-        int "LED green GPIO"
-        default 14
-        range -1 30
+# Discrete RGB pins only for HUB mode
+config LED_GRN_GPIO
+    int "LED green GPIO"
+    default 14
+    range -1 30
+    depends on LED_STATUS_HUB_GPIO
 
-    config LED_BLU_GPIO
-        int "LED blue GPIO"
-        default 25
-        range -1 30
+config LED_BLU_GPIO
+    int "LED blue GPIO"
+    default 25
+    range -1 30
+    depends on LED_STATUS_HUB_GPIO
 
-    config LED_RED_GPIO
-        int "LED red GPIO"
-        default 26
-        range -1 30
+config LED_RED_GPIO
+    int "LED red GPIO"
+    default 26
+    range -1 30
+    depends on LED_STATUS_HUB_GPIO
 
 endmenu

@@ -1,0 +1,81 @@
+menu "Sub-GHz UART Bridge Configuration"
+
+    config SUB_UART_ENABLE
+        bool "Enable Sub-GHz UART bridge"
+        default y
+        help
+            Enables a bidirectional UART bridge between the console UART and the Sub-GHz UART.
+
+    config SUB_UART_PORT_NUM
+        int "Sub-GHz UART port number"
+        range 0 2
+        default 2
+        depends on SUB_UART_ENABLE
+        help
+            UART controller used to talk with the Sub-GHz chip.
+
+    config SUB_UART_BAUD_RATE
+        int "Sub-GHz UART baud rate"
+        range 1200 2000000
+        default 115200
+        depends on SUB_UART_ENABLE
+
+    config SUB_UART_TX_GPIO
+        int "Sub-GHz UART TX GPIO"
+        range 0 48
+        default 24
+        depends on SUB_UART_ENABLE
+        help
+            GPIO used as TX from ESP32 to Sub-GHz (ESP32 TX -> Sub-RX).
+
+    config SUB_UART_RX_GPIO
+        int "Sub-GHz UART RX GPIO"
+        range 0 48
+        default 23
+        depends on SUB_UART_ENABLE
+        help
+            GPIO used as RX into ESP32 from Sub-GHz (Sub-TX -> ESP32 RX).
+
+    config SUB_UART_RTS_GPIO
+        int "Sub-GHz UART RTS GPIO (optional)"
+        range -1 48
+        default -1
+        depends on SUB_UART_ENABLE
+        help
+            Set -1 to disable HW flow control.
+
+    config SUB_UART_CTS_GPIO
+        int "Sub-GHz UART CTS GPIO (optional)"
+        range -1 48
+        default -1
+        depends on SUB_UART_ENABLE
+        help
+            Set -1 to disable HW flow control.
+
+    config CONSOLE_UART_PORT_NUM
+        int "Console UART port number (USB-UART)"
+        range 0 2
+        default 0
+        depends on SUB_UART_ENABLE
+        help
+            UART used by your console/terminal .
+
+    config UART_BRIDGE_BUF_SIZE
+        int "UART bridge buffer size"
+        range 64 4096
+        default 256
+        depends on SUB_UART_ENABLE
+
+    config UART_BRIDGE_TASK_STACK
+        int "UART bridge task stack"
+        range 2048 8192
+        default 4096
+        depends on SUB_UART_ENABLE
+
+    config UART_BRIDGE_TASK_PRIO
+        int "UART bridge task priority"
+        range 1 25
+        default 10
+        depends on SUB_UART_ENABLE
+
+endmenu
