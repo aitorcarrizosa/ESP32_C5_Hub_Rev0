@@ -1,20 +1,29 @@
 #include <stdio.h>
 #include <string.h>
-
-#include "esp_err.h"
-#include "esp_log.h"
-#include "esp_console.h"
-#include "esp_vfs_dev.h"
-#include "esp_system.h"
-#include "sdkconfig.h"
-#include "driver/uart.h"
-#include "driver/uart_vfs.h"
+#include <stdlib.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "led_init.h" 
+#include "esp_err.h"
+#include "esp_console.h"
+#include "esp_system.h"
+#include "sdkconfig.h"
 
+#include "driver/uart.h"
+
+#include "led_init.h"
+
+#include "esp_netif.h"
+#include "esp_eth.h"
+#include "lwip/ip_addr.h"
+#include "lwip/dns.h"
+
+/* ---------------------------- Variables-- ------------------------- */
+esp_netif_t *hub_eth_get_netif(void);
+esp_eth_handle_t hub_eth_get_handle(void);
+
+/* ------------------------- Info command ------------------------- */
 static int cmd_info(int argc, char **argv)
 {
     (void)argc; (void)argv;
@@ -22,6 +31,7 @@ static int cmd_info(int argc, char **argv)
     return 0;
 }
 
+/* ------------------------- Reset command ------------------------- */
 static int cmd_reset(int argc, char **argv)
 {
     (void)argc; (void)argv;
@@ -29,9 +39,10 @@ static int cmd_reset(int argc, char **argv)
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(50));
     esp_restart();
-    return 0;
+    return 0; // not reached
 }
 
+/* ------------------------- LED command ------------------------- */
 static int cmd_led(int argc, char **argv)
 {
     if (argc < 2) {
@@ -59,14 +70,12 @@ static int cmd_led(int argc, char **argv)
         int g = atoi(argv[3]);
         int b = atoi(argv[4]);
 
-        if (r < 0) { r = 0; }
-        if (r > 255) { r = 255; }
-
-        if (g < 0) { g = 0; }
-        if (g > 255) { g = 255; }
-
-        if (b < 0) { b = 0; }
-        if (b > 255) { b = 255; }
+        if (r < 0) r = 0;
+        if (r > 255) r = 255;
+        if (g < 0) g = 0;
+        if (g > 255) g = 255;
+        if (b < 0) b = 0;
+        if (b > 255) b = 255;
 
         status_rgb_set((uint8_t)r, (uint8_t)g, (uint8_t)b);
         return 0;
@@ -75,7 +84,7 @@ static int cmd_led(int argc, char **argv)
     if (argc >= 3 && (!strcmp(argv[2], "on") || !strcmp(argv[2], "off"))) {
         int on = !strcmp(argv[2], "on");
 
-        if (!strcmp(argv[1], "red")) status_rgb_set(on ? 255 : 0, 0, 0);
+        if (!strcmp(argv[1], "red"))      status_rgb_set(on ? 255 : 0, 0, 0);
         else if (!strcmp(argv[1], "grn")) status_rgb_set(0, on ? 255 : 0, 0);
         else if (!strcmp(argv[1], "blu")) status_rgb_set(0, 0, on ? 255 : 0);
         else printf("Unknown channel. Use red|grn|blu\r\n");
@@ -87,11 +96,65 @@ static int cmd_led(int argc, char **argv)
     return 0;
 }
 
+/* ------------------------- ETH command ------------------------- */
+static void print_ip_info(void)
+{
+    esp_netif_t *netif = hub_eth_get_netif();
+    if (!netif) {
+        printf("netif: NULL\r\n");
+        return;
+    }
+
+    esp_netif_ip_info_t ip;
+    if (esp_netif_get_ip_info(netif, &ip) == ESP_OK) {
+        printf("IP   : " IPSTR "\n", IP2STR(&ip.ip));
+        printf("MASK : " IPSTR "\n", IP2STR(&ip.netmask));
+        printf("GW   : " IPSTR "\n", IP2STR(&ip.gw));
+    } else {
+        printf("IP   : (not set)\r\n");
+    }
+
+    const ip_addr_t *dns0 = dns_getserver(0);
+    const ip_addr_t *dns1 = dns_getserver(1);
+
+    if (dns0 && !ip_addr_isany(dns0)) printf("DNS0 : %s\n", ipaddr_ntoa(dns0));
+    if (dns1 && !ip_addr_isany(dns1)) printf("DNS1 : %s\r\n", ipaddr_ntoa(dns1));
+}
+
+static int cmd_eth(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage:\r\n");
+        printf("  eth info\r\n");
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "info")) {
+        esp_eth_handle_t eth = hub_eth_get_handle();
+        if (eth) {
+            uint8_t mac[6] = {0};
+            if (esp_eth_ioctl(eth, ETH_CMD_G_MAC_ADDR, mac) == ESP_OK) {
+                printf("MAC  : %02x:%02x:%02x:%02x:%02x:%02x\n",
+                       mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            }
+        } else {
+            printf("MAC  : (eth not started)\r\n");
+        }
+
+        print_ip_info();
+        return 0;
+    }
+
+    printf("Unknown eth subcommand\r\n");
+    return 0;
+}
+
+/* ------------------------- Command registration ------------------------- */
 static void register_commands(void)
 {
     esp_console_register_help_command();
 
-    const esp_console_cmd_t cmd = {
+    const esp_console_cmd_t cmd_info_def = {
         .command = "info",
         .help = "Print basic info",
         .hint = NULL,
@@ -106,18 +169,30 @@ static void register_commands(void)
         .func = &cmd_reset,
         .argtable = NULL,
     };
-        const esp_console_cmd_t cmd_led_def = {
+
+    const esp_console_cmd_t cmd_led_def = {
         .command = "led",
         .help = "Control status LED (WS2812 on DevKit or discrete RGB on HUB)",
         .hint = NULL,
         .func = &cmd_led,
         .argtable = NULL,
-    };  
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
+    };
+
+    const esp_console_cmd_t cmd_eth_def = {
+        .command = "eth",
+        .help = "Ethernet utilities (info)",
+        .hint = NULL,
+        .func = &cmd_eth,
+        .argtable = NULL,
+    };
+
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_info_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_reset_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_led_def));
-    
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_eth_def));
 }
+
+/* ------------------------- UART console loop (echo) ------------------------- */
 
 static int uart_readline_echo(uart_port_t uart, char *out, int out_sz)
 {
@@ -144,9 +219,7 @@ static int uart_readline_echo(uart_port_t uart, char *out, int out_sz)
             continue;
         }
 
-        if (c < 0x20) {
-            continue;
-        }
+        if (c < 0x20) continue;
 
         if (n < (out_sz - 1)) {
             out[n++] = (char)c;
@@ -176,7 +249,7 @@ void console_start_uart0(void)
         .max_cmdline_args = 8,
         .max_cmdline_length = 256,
     };
-    
+
     err = esp_console_init(&console_cfg);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) ESP_ERROR_CHECK(err);
 

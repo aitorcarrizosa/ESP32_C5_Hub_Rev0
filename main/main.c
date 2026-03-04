@@ -29,6 +29,16 @@ static const char *TAG = "hub_main";
 static esp_netif_t *s_eth_netif = NULL;
 static esp_eth_handle_t s_eth = NULL;
 
+esp_netif_t *hub_eth_get_netif(void)
+{
+    return s_eth_netif;
+}
+
+esp_eth_handle_t hub_eth_get_handle(void)
+{
+    return s_eth;
+}
+
 static EventGroupHandle_t s_netif_eg;
 static const int GOT_IP_BIT = BIT0;
 
@@ -312,7 +322,7 @@ void app_main(void)
 
     // LEDs always available
     led_init();
-    status_rgb_set(16, 16, 16);
+    status_rgb_set(0, 0, 0); // off by default
 
     // Sub bridge: only if enabled in menuconfig
 #if CONFIG_SUB_UART_ENABLE
