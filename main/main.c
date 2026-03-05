@@ -17,6 +17,7 @@
 #include "esp_netif_sntp.h"
 
 #include "led_init.h"
+
 #include "sub_init.h"
 
 // helper (ethernet_init component)
@@ -324,14 +325,9 @@ void app_main(void)
     led_init();
     status_rgb_set(0, 0, 0); // off by default
 
-    // Sub bridge: only if enabled in menuconfig
-#if CONFIG_SUB_UART_ENABLE
-    if (!sub_uart_bridge_init()) {
-        ESP_LOGW(TAG, "sub_uart_bridge_init failed (continuing)");
-    }
-#else
-    ESP_LOGI(TAG, "Sub UART bridge disabled by menuconfig");
-#endif
+    // Sub UART always ON (init + RX mirror to console)
+    ESP_ERROR_CHECK(sub_uart_init());
+    ESP_ERROR_CHECK(sub_rx_mirror_start((uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM));
 
     // Ethernet/W5500: start only if enabled in menuconfig (cnt>0)
     (void)try_start_ethernet();

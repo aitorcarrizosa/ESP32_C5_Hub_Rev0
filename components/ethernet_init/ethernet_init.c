@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
  */
 #include "ethernet_init.h"
+
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_mac.h"
-#include "driver/gpio.h"
 #include "sdkconfig.h"
+#include "driver/gpio.h"
 #if CONFIG_EXAMPLE_USE_SPI_ETHERNET
 #include "driver/spi_master.h"
 #endif // CONFIG_EXAMPLE_USE_SPI_ETHERNET

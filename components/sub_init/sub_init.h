@@ -1,6 +1,14 @@
 #pragma once
+#include <stdint.h>
+#include "esp_err.h"
+#include "driver/uart.h"
 
-#include <stdbool.h>
+esp_err_t sub_uart_init(void);
 
-bool sub_uart_bridge_init(void);
-void sub_uart_bridge_deinit(void);
+esp_err_t sub_rx_mirror_start(uart_port_t console_uart);
+esp_err_t sub_rx_mirror_stop(void);
+
+esp_err_t sub_send_line(const char *line);
+
+esp_err_t sub_reset_pulse(int pulse_ms);
+esp_err_t sub_drain_uart_to_console_ms(int ms);

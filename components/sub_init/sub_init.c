@@ -1,100 +1,36 @@
 #include "sub_init.h"
 
 #include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#include "esp_err.h"
 #include "esp_log.h"
+
+#include "driver/gpio.h"
 #include "driver/uart.h"
-#include "sdkconfig.h"
+
+static const char *TAG = "sub";
+
+/* ------------------------- internal state ------------------------- */
+static TaskHandle_t s_rx_task = NULL;
+static volatile bool s_rx_running = false;
+static uart_port_t s_console_uart = UART_NUM_0;
 
 #if CONFIG_SUB_UART_ENABLE
 
-static const char *TAG = "sub_uart_bridge";
-static TaskHandle_t s_bridge_task = NULL;
-static bool s_started = false;
-
-static void uart_bridge_task(void *arg)
-{
-    const uart_port_t console_uart = (uart_port_t)CONFIG_CONSOLE_UART_PORT_NUM;
-    const uart_port_t sub_uart     = (uart_port_t)CONFIG_SUB_UART_PORT_NUM;
-
-    const int buf_sz = CONFIG_UART_BRIDGE_BUF_SIZE;
-
-    uint8_t *buf_console = (uint8_t *)heap_caps_malloc(buf_sz, MALLOC_CAP_DEFAULT);
-    uint8_t *buf_sub     = (uint8_t *)heap_caps_malloc(buf_sz, MALLOC_CAP_DEFAULT);
-
-    if (!buf_console || !buf_sub) {
-        ESP_LOGE(TAG, "malloc failed (buf_sz=%d)", buf_sz);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    ESP_LOGI(TAG, "UART bridge running: console UART%d <-> sub UART%d",
-             (int)console_uart, (int)sub_uart);
-
-    while (1) {
-        // 1) console -> sub
-        int n1 = uart_read_bytes(console_uart, buf_console, buf_sz, pdMS_TO_TICKS(10));
-        if (n1 > 0) {
-            // write exactly what was read
-            int w1 = uart_write_bytes(sub_uart, (const char *)buf_console, n1);
-            if (w1 < 0) {
-                ESP_LOGW(TAG, "uart_write_bytes sub failed");
-            }
-        }
-
-        // 2) sub -> console
-        int n2 = uart_read_bytes(sub_uart, buf_sub, buf_sz, pdMS_TO_TICKS(10));
-        if (n2 > 0) {
-            int w2 = uart_write_bytes(console_uart, (const char *)buf_sub, n2);
-            if (w2 < 0) {
-                ESP_LOGW(TAG, "uart_write_bytes console failed");
-            }
-        }
-        taskYIELD();
-    }
-}
-
-static esp_err_t uart_setup_console(void)
-{
-    const uart_port_t console_uart = (uart_port_t)CONFIG_CONSOLE_UART_PORT_NUM;
-
-    uart_config_t cfg = {
-        .baud_rate = CONFIG_SUB_UART_BAUD_RATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = (CONFIG_SUB_UART_RTS_GPIO >= 0 && CONFIG_SUB_UART_CTS_GPIO >= 0)
-                        ? UART_HW_FLOWCTRL_CTS_RTS
-                        : UART_HW_FLOWCTRL_DISABLE,
-        .rx_flow_ctrl_thresh = 64,
-        .source_clk = UART_SCLK_DEFAULT
-    };
-
-    esp_err_t err = uart_param_config(console_uart, &cfg);
-    if (err != ESP_OK) return err;
-
-    err = uart_driver_install(console_uart, 2048, 2048, 0, NULL, 0);
-    if (err == ESP_ERR_INVALID_STATE) {
-        return ESP_OK;
-    }
-    return err;
-}
-
-static esp_err_t uart_setup_sub(void)
+esp_err_t sub_uart_init(void)
 {
     const uart_port_t sub_uart = (uart_port_t)CONFIG_SUB_UART_PORT_NUM;
 
-    uart_config_t cfg = {
-        .baud_rate = CONFIG_SUB_UART_BAUD_RATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = (CONFIG_SUB_UART_RTS_GPIO >= 0 && CONFIG_SUB_UART_CTS_GPIO >= 0)
-                        ? UART_HW_FLOWCTRL_CTS_RTS
-                        : UART_HW_FLOWCTRL_DISABLE,
-        .rx_flow_ctrl_thresh = 64,
-        .source_clk = UART_SCLK_DEFAULT
+    const uart_config_t cfg = {
+        .baud_rate  = CONFIG_SUB_UART_BAUD,
+        .data_bits  = UART_DATA_8_BITS,
+        .parity     = UART_PARITY_DISABLE,
+        .stop_bits  = UART_STOP_BITS_1,
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
     };
 
     esp_err_t err = uart_param_config(sub_uart, &cfg);
@@ -103,79 +39,145 @@ static esp_err_t uart_setup_sub(void)
     err = uart_set_pin(sub_uart,
                        CONFIG_SUB_UART_TX_GPIO,
                        CONFIG_SUB_UART_RX_GPIO,
-                       (CONFIG_SUB_UART_RTS_GPIO >= 0) ? CONFIG_SUB_UART_RTS_GPIO : UART_PIN_NO_CHANGE,
-                       (CONFIG_SUB_UART_CTS_GPIO >= 0) ? CONFIG_SUB_UART_CTS_GPIO : UART_PIN_NO_CHANGE);
+                       UART_PIN_NO_CHANGE,
+                       UART_PIN_NO_CHANGE);
     if (err != ESP_OK) return err;
 
-    // Buffers RX/TX para el driver
-    err = uart_driver_install(sub_uart, 2048, 2048, 0, NULL, 0);
-    return err;
+    // RX buffer only needed if we read from it. Keep some margin.
+    err = uart_driver_install(sub_uart, 4096, 0, 0, NULL, 0);
+    if (err == ESP_ERR_INVALID_STATE) err = ESP_OK;
+    if (err != ESP_OK) return err;
+
+    // nRST
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << CONFIG_SUB_NRST_GPIO),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = 0,
+        .pull_down_en = 0,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&io));
+    gpio_set_level(CONFIG_SUB_NRST_GPIO, 1);
+
+    return ESP_OK;
 }
 
-bool sub_uart_bridge_init(void)
+static void rx_mirror_task(void *arg)
 {
-    if (s_started) {
-        ESP_LOGW(TAG, "already started");
-        return true;
+    (void)arg;
+    const uart_port_t sub_uart = (uart_port_t)CONFIG_SUB_UART_PORT_NUM;
+
+    uint8_t buf[512];
+
+    ESP_LOGI(TAG, "RX mirror ON: sub UART%d -> console UART%d (baud=%d)",
+             (int)sub_uart, (int)s_console_uart, (int)CONFIG_SUB_UART_BAUD);
+
+    while (s_rx_running) {
+        int n = uart_read_bytes(sub_uart, buf, sizeof(buf), pdMS_TO_TICKS(50));
+        if (n > 0) {
+            uart_write_bytes(s_console_uart, (const char *)buf, n);
+        }
+        taskYIELD();
     }
 
-    esp_err_t err;
+    ESP_LOGI(TAG, "RX mirror OFF");
+    s_rx_task = NULL;
+    vTaskDelete(NULL);
+}
 
-    err = uart_setup_console();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "uart_setup_console failed: %s", esp_err_to_name(err));
-        return false;
-    }
+esp_err_t sub_rx_mirror_start(uart_port_t console_uart)
+{
+    if (s_rx_running) return ESP_OK;
 
-    err = uart_setup_sub();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "uart_setup_sub failed: %s", esp_err_to_name(err));
-        return false;
-    }
+    s_console_uart = console_uart;
+    s_rx_running = true;
 
-    BaseType_t ok = xTaskCreate(
-        uart_bridge_task,
-        "uart_bridge",
-        CONFIG_UART_BRIDGE_TASK_STACK,
-        NULL,
-        CONFIG_UART_BRIDGE_TASK_PRIO,
-        &s_bridge_task
-    );
-
+    BaseType_t ok = xTaskCreate(rx_mirror_task, "sub_rx_mirror", 4096, NULL, 5, &s_rx_task);
     if (ok != pdPASS) {
-        ESP_LOGE(TAG, "xTaskCreate failed");
-        s_bridge_task = NULL;
-        return false;
+        s_rx_running = false;
+        s_rx_task = NULL;
+        return ESP_FAIL;
     }
-
-    s_started = true;
-    return true;
+    return ESP_OK;
 }
 
-void sub_uart_bridge_deinit(void)
+esp_err_t sub_rx_mirror_stop(void)
 {
-    if (!s_started) return;
+    if (!s_rx_running) return ESP_OK;
 
-    if (s_bridge_task) {
-        vTaskDelete(s_bridge_task);
-        s_bridge_task = NULL;
+    s_rx_running = false;
+
+    // wait task exits to avoid race on restart
+    for (int i = 0; i < 30; i++) { // 300ms
+        if (s_rx_task == NULL) return ESP_OK;
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
+
+    ESP_LOGW(TAG, "sub_rx_mirror_stop: timeout waiting task exit");
+    return ESP_OK;
+}
+
+esp_err_t sub_send_line(const char *line)
+{
+    if (!line) return ESP_ERR_INVALID_ARG;
 
     const uart_port_t sub_uart = (uart_port_t)CONFIG_SUB_UART_PORT_NUM;
-    uart_driver_delete(sub_uart);
 
-    s_started = false;
+    // IMPORTANTE: NO metas \r \n en "line". Aquí añadimos ENTER nosotros.
+    int w1 = uart_write_bytes(sub_uart, line, (int)strlen(line));
+    int w2 = uart_write_bytes(sub_uart, "\r", 1);      // prueba con CR solo
+
+    if (w1 < 0 || w2 < 0) return ESP_FAIL;
+
+    // Asegura que el TX realmente ha salido por el pin
+    esp_err_t err = uart_wait_tx_done(sub_uart, pdMS_TO_TICKS(200));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "uart_wait_tx_done failed: %s", esp_err_to_name(err));
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t sub_reset_pulse(int pulse_ms)
+{
+    if (pulse_ms <= 0) pulse_ms = 50;
+
+    gpio_set_level(CONFIG_SUB_NRST_GPIO, 0);
+    vTaskDelay(pdMS_TO_TICKS(pulse_ms));
+    gpio_set_level(CONFIG_SUB_NRST_GPIO, 1);
+
+    return ESP_OK;
+}
+
+esp_err_t sub_drain_uart_to_console_ms(int ms)
+{
+    if (ms <= 0) return ESP_OK;
+
+    const uart_port_t sub_uart = (uart_port_t)CONFIG_SUB_UART_PORT_NUM;
+
+    // Leemos todo lo que venga del Sub durante "ms" y lo volcamos a la consola.
+    TickType_t t0 = xTaskGetTickCount();
+    TickType_t deadline = t0 + pdMS_TO_TICKS((uint32_t)ms);
+
+    uint8_t buf[256];
+
+    while ((int32_t)(deadline - xTaskGetTickCount()) > 0) {
+        int n = uart_read_bytes(sub_uart, buf, sizeof(buf), pdMS_TO_TICKS(20));
+        if (n > 0) {
+            uart_write_bytes(s_console_uart, (const char *)buf, n);
+        }
+        taskYIELD();
+    }
+
+    return ESP_OK;
 }
 
 #else
 
-bool sub_uart_bridge_init(void)
-{
-    return false;
-}
-
-void sub_uart_bridge_deinit(void)
-{
-}
+esp_err_t sub_uart_init(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t sub_rx_mirror_start(uart_port_t console_uart) { (void)console_uart; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t sub_rx_mirror_stop(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t sub_send_line(const char *line) { (void)line; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t sub_reset_pulse(int pulse_ms) { (void)pulse_ms; return ESP_ERR_NOT_SUPPORTED; }
 
 #endif

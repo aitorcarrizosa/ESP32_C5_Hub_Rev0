@@ -56,8 +56,7 @@ void led_set(led_t led, bool on)
     int gpio_num = led_to_gpio(led);
     if (gpio_num < 0) return;
 
-    // Hub: active-HIGH (MOSFET low-side)
-    gpio_set_level(gpio_num, on ? 1 : 0);
+    gpio_set_level(gpio_num, on ? 1 : 0);       // Hub: active-HIGH (MOSFET low-side)
 }
 
 void led_all_off(void)
@@ -74,8 +73,7 @@ void status_rgb_set(uint8_t r, uint8_t g, uint8_t b)
     status_rgb_ws2812_set(r, g, b);
 
 #elif CONFIG_LED_STATUS_HUB_GPIO
-    // Discrete LEDs -> threshold mapping (active-high)
-    const uint8_t th = 8;
+    const uint8_t th = 8;    // Discrete LEDs -> threshold mapping (active-high)
     led_set(LED_RED, (r >= th));
     led_set(LED_GRN, (g >= th));
     led_set(LED_BLU, (b >= th));

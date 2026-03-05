@@ -19,6 +19,8 @@
 #include "lwip/ip_addr.h"
 #include "lwip/dns.h"
 
+#include "sub_init.h"
+
 /* ---------------------------- Variables-- ------------------------- */
 esp_netif_t *hub_eth_get_netif(void);
 esp_eth_handle_t hub_eth_get_handle(void);
@@ -35,11 +37,11 @@ static int cmd_info(int argc, char **argv)
 static int cmd_reset(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    printf("Rebooting...\r\n");
+    printf("System resetting...\r\n");
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(50));
     esp_restart();
-    return 0; // not reached
+    return 0;
 }
 
 /* ------------------------- LED command ------------------------- */
@@ -149,6 +151,89 @@ static int cmd_eth(int argc, char **argv)
     return 0;
 }
 
+/* ----------------------------- Command Sub-GHz --------------------------- */
+static int console_readline_echo(uart_port_t uart, char *out, int out_sz)
+{
+    int n = 0;
+
+    while (1) {
+        uint8_t c;
+        int r = uart_read_bytes(uart, &c, 1, pdMS_TO_TICKS(50));
+        if (r <= 0) continue;
+
+        if (c == '\r' || c == '\n') {
+            const char *nl = "\r\n";
+            uart_write_bytes(uart, nl, 2);
+            out[n] = 0;
+            return n;
+        }
+
+        if (c == 0x08 || c == 0x7F) {
+            if (n > 0) {
+                n--;
+                const char bs_seq[3] = { '\b', ' ', '\b' };
+                uart_write_bytes(uart, bs_seq, 3);
+            }
+            continue;
+        }
+
+        if (c < 0x20) continue;
+
+        if (n < (out_sz - 1)) {
+            out[n++] = (char)c;
+            uart_write_bytes(uart, (const char *)&c, 1);
+        }
+    }
+}
+
+static int cmd_sub(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage:\r\n");
+        printf("  sub send [text]\r\n");
+        printf("  sub rst [ms]\r\n");
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "send")) {
+
+        // Mantener mirror ON: queremos ver la respuesta del SubGig en UART0
+
+        // Limpia cualquier basura pendiente en RX del Sub UART
+        uart_flush_input((uart_port_t)CONFIG_SUB_UART_PORT_NUM);
+
+        printf("[DBG] -> SUB: 'help' + ENTER\r\n");
+
+        // Enviar "help" + ENTER al SubGig (por UART_SUB, NO por UART0)
+        esp_err_t err = sub_send_line("h");
+        if (err != ESP_OK) {
+            printf("ERROR: sub_send_line(help) failed: %s\r\n", esp_err_to_name(err));
+            return 0;
+        }
+
+        // vTaskDelay(pdMS_TO_TICKS(1500));
+
+        // printf("[DBG] (if mirror is ON, SubGig output should appear above)\r\n");
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "rst")) {
+        int ms = 50;
+        if (argc >= 3) ms = atoi(argv[2]);
+
+        esp_err_t err = sub_reset_pulse(ms);
+        if (err == ESP_ERR_NOT_SUPPORTED) {
+            printf("nRST not configured (menuconfig)\r\n");
+        } else if (err != ESP_OK) {
+            printf("sub rst failed: %s\r\n", esp_err_to_name(err));
+        }
+        return 0;
+    }
+
+    printf("Unknown sub command\r\n");
+    return 0;
+}
+
 /* ------------------------- Command registration ------------------------- */
 static void register_commands(void)
 {
@@ -164,7 +249,7 @@ static void register_commands(void)
 
     const esp_console_cmd_t cmd_reset_def = {
         .command = "reset",
-        .help = "Reboot the device",
+        .help = "Reset the device",
         .hint = NULL,
         .func = &cmd_reset,
         .argtable = NULL,
@@ -186,14 +271,22 @@ static void register_commands(void)
         .argtable = NULL,
     };
 
+    const esp_console_cmd_t cmd_sub_def = {
+        .command = "sub",
+        .help = "Sub-GHz module utilities (send/rst)",
+        .hint = NULL,
+        .func = &cmd_sub,
+        .argtable = NULL,
+    };
+
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_info_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_reset_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_led_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_eth_def));
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_sub_def));
 }
 
 /* ------------------------- UART console loop (echo) ------------------------- */
-
 static int uart_readline_echo(uart_port_t uart, char *out, int out_sz)
 {
     int n = 0;
