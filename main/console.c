@@ -197,23 +197,20 @@ static int cmd_sub(int argc, char **argv)
 
     if (!strcmp(argv[1], "send")) {
 
-        // Mantener mirror ON: queremos ver la respuesta del SubGig en UART0
+        uart_flush_input((uart_port_t)CONFIG_SUB_UART_PORT_NUM);        // Clean SUB UART RX buffer
 
-        // Limpia cualquier basura pendiente en RX del Sub UART
-        uart_flush_input((uart_port_t)CONFIG_SUB_UART_PORT_NUM);
-
-        printf("[DBG] -> SUB: 'help' + ENTER\r\n");
-
-        // Enviar "help" + ENTER al SubGig (por UART_SUB, NO por UART0)
-        esp_err_t err = sub_send_line("h");
+        esp_err_t err = sub_send_line("subgig send");
         if (err != ESP_OK) {
-            printf("ERROR: sub_send_line(help) failed: %s\r\n", esp_err_to_name(err));
+            printf("ERROR: sub_send_line(subgig send) failed: %s\r\n", esp_err_to_name(err));
+            return 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        err = sub_send_line("ACKNOWLEDGE");
+        if (err != ESP_OK) {
+            printf("ERROR: sub_send_line(ACKNOWLEDGE) failed: %s\r\n", esp_err_to_name(err));
             return 0;
         }
 
-        // vTaskDelay(pdMS_TO_TICKS(1500));
-
-        // printf("[DBG] (if mirror is ON, SubGig output should appear above)\r\n");
         return 0;
     }
 

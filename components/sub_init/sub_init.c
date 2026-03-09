@@ -123,13 +123,11 @@ esp_err_t sub_send_line(const char *line)
 
     const uart_port_t sub_uart = (uart_port_t)CONFIG_SUB_UART_PORT_NUM;
 
-    // IMPORTANTE: NO metas \r \n en "line". Aquí añadimos ENTER nosotros.
     int w1 = uart_write_bytes(sub_uart, line, (int)strlen(line));
-    int w2 = uart_write_bytes(sub_uart, "\r", 1);      // prueba con CR solo
+    int w2 = uart_write_bytes(sub_uart, "\r", 1);
 
     if (w1 < 0 || w2 < 0) return ESP_FAIL;
 
-    // Asegura que el TX realmente ha salido por el pin
     esp_err_t err = uart_wait_tx_done(sub_uart, pdMS_TO_TICKS(200));
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "uart_wait_tx_done failed: %s", esp_err_to_name(err));
@@ -145,29 +143,6 @@ esp_err_t sub_reset_pulse(int pulse_ms)
     gpio_set_level(CONFIG_SUB_NRST_GPIO, 0);
     vTaskDelay(pdMS_TO_TICKS(pulse_ms));
     gpio_set_level(CONFIG_SUB_NRST_GPIO, 1);
-
-    return ESP_OK;
-}
-
-esp_err_t sub_drain_uart_to_console_ms(int ms)
-{
-    if (ms <= 0) return ESP_OK;
-
-    const uart_port_t sub_uart = (uart_port_t)CONFIG_SUB_UART_PORT_NUM;
-
-    // Leemos todo lo que venga del Sub durante "ms" y lo volcamos a la consola.
-    TickType_t t0 = xTaskGetTickCount();
-    TickType_t deadline = t0 + pdMS_TO_TICKS((uint32_t)ms);
-
-    uint8_t buf[256];
-
-    while ((int32_t)(deadline - xTaskGetTickCount()) > 0) {
-        int n = uart_read_bytes(sub_uart, buf, sizeof(buf), pdMS_TO_TICKS(20));
-        if (n > 0) {
-            uart_write_bytes(s_console_uart, (const char *)buf, n);
-        }
-        taskYIELD();
-    }
 
     return ESP_OK;
 }

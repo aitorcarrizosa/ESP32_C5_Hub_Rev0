@@ -11,4 +11,3 @@ esp_err_t sub_rx_mirror_stop(void);
 esp_err_t sub_send_line(const char *line);
 
 esp_err_t sub_reset_pulse(int pulse_ms);
-esp_err_t sub_drain_uart_to_console_ms(int ms);
