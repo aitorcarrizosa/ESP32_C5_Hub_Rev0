@@ -6,4 +6,42 @@ menu "Example Configuration"
         help
             This option is for demonstration purposes only to demonstrate deinitialization of the Ethernet driver.
             Set to -1 to not deinitialize.
+
+    config HUB_PAIR_BUTTON_GPIO
+        int "Pairing button GPIO"
+        range -1 30
+        default 5
+        help
+            GPIO used for the hub pairing button. Hold it for the configured
+            duration to enter pairing mode. Set to -1 to disable hardware button support.
+
+    config HUB_PAIR_BUTTON_ACTIVE_LOW
+        bool "Pairing button is active low"
+        default y
+        depends on HUB_PAIR_BUTTON_GPIO >= 0
+
+    config HUB_PAIR_BUTTON_PULLUP
+        bool "Enable internal pull-up for pairing button"
+        default y
+        depends on HUB_PAIR_BUTTON_GPIO >= 0
+
+    config HUB_PAIR_HOLD_MS
+        int "Pairing button hold time (ms)"
+        range 1000 60000
+        default 10000
+
+    config HUB_PAIR_WINDOW_MS
+        int "Pairing window duration (ms)"
+        range 1000 300000
+        default 60000
+
+    config HUB_PAIR_ACK_DELAY_MS
+        int "ACK command delay to STM32 (ms)"
+        range 100 5000
+        default 1000
+
+    config HUB_PAIR_MAX_NODES
+        int "Maximum paired nodes"
+        range 1 64
+        default 16
 endmenu

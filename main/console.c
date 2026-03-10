@@ -20,6 +20,7 @@
 #include "lwip/dns.h"
 
 #include "sub_init.h"
+#include "hub_pairing.h"
 
 /* ---------------------------- Variables-- ------------------------- */
 esp_netif_t *hub_eth_get_netif(void);
@@ -231,6 +232,53 @@ static int cmd_sub(int argc, char **argv)
     return 0;
 }
 
+static int cmd_pair(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage:\r\n");
+        printf("  pair start\r\n");
+        printf("  pair list\r\n");
+        printf("  pair clear\r\n");
+        printf("  pair status\r\n");
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "start")) {
+        esp_err_t err = hub_pairing_start();
+        if (err != ESP_OK) {
+            printf("pair start failed: %s\r\n", esp_err_to_name(err));
+        }
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "list")) {
+        char ids[CONFIG_HUB_PAIR_MAX_NODES][HUB_NODE_ID_LEN + 1];
+        size_t count = hub_pairing_copy_node_ids(ids, CONFIG_HUB_PAIR_MAX_NODES);
+        printf("paired nodes: %u\r\n", (unsigned)count);
+        for (size_t i = 0; i < count; i++) {
+            printf("  %u: %s\r\n", (unsigned)(i + 1), ids[i]);
+        }
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "clear")) {
+        esp_err_t err = hub_pairing_clear();
+        if (err != ESP_OK) {
+            printf("pair clear failed: %s\r\n", esp_err_to_name(err));
+        }
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "status")) {
+        printf("pairing: %s\r\n", hub_pairing_is_active() ? "active" : "idle");
+        printf("paired nodes: %u\r\n", (unsigned)hub_pairing_get_count());
+        return 0;
+    }
+
+    printf("Unknown pair subcommand\r\n");
+    return 0;
+}
+
 /* ------------------------- Command registration ------------------------- */
 static void register_commands(void)
 {
@@ -276,11 +324,20 @@ static void register_commands(void)
         .argtable = NULL,
     };
 
+    const esp_console_cmd_t cmd_pair_def = {
+        .command = "pair",
+        .help = "Pairing utilities (start/list/clear/status)",
+        .hint = NULL,
+        .func = &cmd_pair,
+        .argtable = NULL,
+    };
+
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_info_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_reset_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_led_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_eth_def));
     ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_sub_def));
+    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd_pair_def));
 }
 
 /* ------------------------- UART console loop (echo) ------------------------- */

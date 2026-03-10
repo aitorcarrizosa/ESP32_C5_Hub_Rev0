@@ -17,6 +17,8 @@ static const char *TAG = "sub";
 static TaskHandle_t s_rx_task = NULL;
 static volatile bool s_rx_running = false;
 static uart_port_t s_console_uart = UART_NUM_0;
+static sub_line_rx_cb_t s_line_cb = NULL;
+static void *s_line_cb_ctx = NULL;
 
 #if CONFIG_SUB_UART_ENABLE
 
@@ -67,7 +69,9 @@ static void rx_mirror_task(void *arg)
     (void)arg;
     const uart_port_t sub_uart = (uart_port_t)CONFIG_SUB_UART_PORT_NUM;
 
-    uint8_t buf[512];
+    uint8_t buf[128];
+    char line[256];
+    size_t line_len = 0;
 
     ESP_LOGI(TAG, "RX mirror ON: sub UART%d -> console UART%d (baud=%d)",
              (int)sub_uart, (int)s_console_uart, (int)CONFIG_SUB_UART_BAUD);
@@ -76,6 +80,31 @@ static void rx_mirror_task(void *arg)
         int n = uart_read_bytes(sub_uart, buf, sizeof(buf), pdMS_TO_TICKS(50));
         if (n > 0) {
             uart_write_bytes(s_console_uart, (const char *)buf, n);
+
+            for (int i = 0; i < n; i++) {
+                char c = (char)buf[i];
+
+                if (c == '\r' || c == '\n') {
+                    if (line_len > 0) {
+                        line[line_len] = '\0';
+                        if (s_line_cb) {
+                            s_line_cb(line, s_line_cb_ctx);
+                        }
+                        line_len = 0;
+                    }
+                    continue;
+                }
+
+                if (line_len < (sizeof(line) - 1)) {
+                    line[line_len++] = c;
+                } else {
+                    line[sizeof(line) - 1] = '\0';
+                    if (s_line_cb) {
+                        s_line_cb(line, s_line_cb_ctx);
+                    }
+                    line_len = 0;
+                }
+            }
         }
         taskYIELD();
     }
@@ -98,6 +127,13 @@ esp_err_t sub_rx_mirror_start(uart_port_t console_uart)
         s_rx_task = NULL;
         return ESP_FAIL;
     }
+    return ESP_OK;
+}
+
+esp_err_t sub_set_line_callback(sub_line_rx_cb_t cb, void *ctx)
+{
+    s_line_cb = cb;
+    s_line_cb_ctx = ctx;
     return ESP_OK;
 }
 
@@ -152,6 +188,7 @@ esp_err_t sub_reset_pulse(int pulse_ms)
 esp_err_t sub_uart_init(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t sub_rx_mirror_start(uart_port_t console_uart) { (void)console_uart; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t sub_rx_mirror_stop(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t sub_set_line_callback(sub_line_rx_cb_t cb, void *ctx) { (void)cb; (void)ctx; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t sub_send_line(const char *line) { (void)line; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t sub_reset_pulse(int pulse_ms) { (void)pulse_ms; return ESP_ERR_NOT_SUPPORTED; }
 

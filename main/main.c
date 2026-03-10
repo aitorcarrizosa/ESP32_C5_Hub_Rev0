@@ -19,6 +19,7 @@
 #include "led_init.h"
 
 #include "sub_init.h"
+#include "hub_pairing.h"
 
 // helper (ethernet_init component)
 esp_err_t example_eth_init(esp_eth_handle_t **eth_handles_out, uint8_t *eth_port_cnt_out);
@@ -327,6 +328,7 @@ void app_main(void)
 
     // Sub UART always ON (init + RX mirror to console)
     ESP_ERROR_CHECK(sub_uart_init());
+    ESP_ERROR_CHECK(hub_pairing_init());
     ESP_ERROR_CHECK(sub_rx_mirror_start((uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM));
 
     // Ethernet/W5500: start only if enabled in menuconfig (cnt>0)
