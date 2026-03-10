@@ -197,19 +197,25 @@ static int cmd_sub(int argc, char **argv)
 
     if (!strcmp(argv[1], "send")) {
 
+        sub_rx_mirror_stop();       // Stop RX mirror to avoid mixing output with sub responses
         uart_flush_input((uart_port_t)CONFIG_SUB_UART_PORT_NUM);        // Clean SUB UART RX buffer
 
         esp_err_t err = sub_send_line("subgig send");
         if (err != ESP_OK) {
             printf("ERROR: sub_send_line(subgig send) failed: %s\r\n", esp_err_to_name(err));
+            sub_rx_mirror_start((uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM);      // Restart RX mirror before leaving
             return 0;
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+
         err = sub_send_line("ACKNOWLEDGE");
         if (err != ESP_OK) {
             printf("ERROR: sub_send_line(ACKNOWLEDGE) failed: %s\r\n", esp_err_to_name(err));
+            sub_rx_mirror_start((uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM);      // Restart RX mirror before leaving
             return 0;
         }
+        sub_rx_mirror_start((uart_port_t)CONFIG_ESP_CONSOLE_UART_NUM);
 
         return 0;
     }
