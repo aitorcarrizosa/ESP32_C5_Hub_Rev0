@@ -153,40 +153,6 @@ static int cmd_eth(int argc, char **argv)
 }
 
 /* ----------------------------- Command Sub-GHz --------------------------- */
-static int console_readline_echo(uart_port_t uart, char *out, int out_sz)
-{
-    int n = 0;
-
-    while (1) {
-        uint8_t c;
-        int r = uart_read_bytes(uart, &c, 1, pdMS_TO_TICKS(50));
-        if (r <= 0) continue;
-
-        if (c == '\r' || c == '\n') {
-            const char *nl = "\r\n";
-            uart_write_bytes(uart, nl, 2);
-            out[n] = 0;
-            return n;
-        }
-
-        if (c == 0x08 || c == 0x7F) {
-            if (n > 0) {
-                n--;
-                const char bs_seq[3] = { '\b', ' ', '\b' };
-                uart_write_bytes(uart, bs_seq, 3);
-            }
-            continue;
-        }
-
-        if (c < 0x20) continue;
-
-        if (n < (out_sz - 1)) {
-            out[n++] = (char)c;
-            uart_write_bytes(uart, (const char *)&c, 1);
-        }
-    }
-}
-
 static int cmd_sub(int argc, char **argv)
 {
     if (argc < 2) {
