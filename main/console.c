@@ -166,15 +166,9 @@ static int cmd_sub(int argc, char **argv)
 
         uart_flush_input((uart_port_t)CONFIG_SUB_UART_PORT_NUM);        // Clean SUB UART RX buffer
 
-        esp_err_t err = sub_send_line("subgig send");
+        esp_err_t err = sub_send_line("subgig send ACKNOWLEDGE");
         if (err != ESP_OK) {
-            printf("ERROR: sub_send_line(subgig send) failed: %s\r\n", esp_err_to_name(err));
-            return 0;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        err = sub_send_line("ACKNOWLEDGE");
-        if (err != ESP_OK) {
-            printf("ERROR: sub_send_line(ACKNOWLEDGE) failed: %s\r\n", esp_err_to_name(err));
+            printf("ERROR: sub_send_line(subgig send ACKNOWLEDGE) failed: %s\r\n", esp_err_to_name(err));
             return 0;
         }
 

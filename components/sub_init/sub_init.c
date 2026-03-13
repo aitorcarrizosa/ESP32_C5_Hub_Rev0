@@ -20,6 +20,14 @@ static uart_port_t s_console_uart = UART_NUM_0;
 static sub_line_rx_cb_t s_line_cb = NULL;
 static void *s_line_cb_ctx = NULL;
 
+static bool should_mirror_line(const char *line)
+{
+    return strncmp(line, "SG-Sensor>", strlen("SG-Sensor>")) != 0 &&
+           strncmp(line, "SG-Eval-Board>", strlen("SG-Eval-Board>")) != 0 &&
+           strcmp(line, " SUBGIG TX: Enter msg you want to send and press enter") != 0 &&
+           strcmp(line, " OK: SUBGIG TX msg has been sent") != 0;
+}
+
 #if CONFIG_SUB_UART_ENABLE
 
 esp_err_t sub_uart_init(void)
@@ -79,14 +87,16 @@ static void rx_mirror_task(void *arg)
     while (s_rx_running) {
         int n = uart_read_bytes(sub_uart, buf, sizeof(buf), pdMS_TO_TICKS(50));
         if (n > 0) {
-            uart_write_bytes(s_console_uart, (const char *)buf, n);
-
             for (int i = 0; i < n; i++) {
                 char c = (char)buf[i];
 
                 if (c == '\r' || c == '\n') {
                     if (line_len > 0) {
                         line[line_len] = '\0';
+                        if (should_mirror_line(line)) {
+                            uart_write_bytes(s_console_uart, line, (uint32_t)line_len);
+                            uart_write_bytes(s_console_uart, "\r\n", 2);
+                        }
                         if (s_line_cb) {
                             s_line_cb(line, s_line_cb_ctx);
                         }

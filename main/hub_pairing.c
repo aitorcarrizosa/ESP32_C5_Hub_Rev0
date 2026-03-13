@@ -22,8 +22,7 @@
 #define PAIRING_NAMESPACE "pairing"
 #define PAIRING_BLOB_KEY "nodes"
 #define PAIRING_MAGIC 0x50414952u
-#define ACK_TEXT "ACKNOWLEDGE"
-#define ACK_SUBGIG_CMD "subgig send"
+#define ACK_SUBGIG_CMD "subgig send ACKNOWLEDGE"
 
 typedef struct {
     char line[256];
@@ -52,6 +51,7 @@ typedef struct {
     bool capture_has_data;
     char capture_payload[256];
     size_t capture_len;
+    size_t capture_expected_len;
 } hub_pairing_state_t;
 
 static const char *TAG = "hub_pair";
@@ -267,6 +267,27 @@ static bool append_ascii_dump_chunk(const char *line)
     return true;
 }
 
+static void capture_reset(void)
+{
+    s_state.capture_active = false;
+    s_state.capture_has_data = false;
+    s_state.capture_len = 0;
+    s_state.capture_expected_len = 0;
+    s_state.capture_payload[0] = '\0';
+}
+
+static void update_capture_expected_len(const char *line)
+{
+    unsigned int bytes = 0;
+
+    if (sscanf(line, "Receive %u bytes", &bytes) == 1) {
+        if (bytes > (sizeof(s_state.capture_payload) - 1)) {
+            bytes = (unsigned int)(sizeof(s_state.capture_payload) - 1);
+        }
+        s_state.capture_expected_len = (size_t)bytes;
+    }
+}
+
 static esp_err_t queue_ack(void)
 {
     uint8_t token = 1;
@@ -289,7 +310,9 @@ static void process_payload(const char *payload)
             if (err == ESP_OK) {
                 pulse_red_locked(200);
                 ack_required = true;
-                ESP_LOGI(TAG, "%s node %s", added ? "paired" : "already paired", node_id);
+                if (added) {
+                    ESP_LOGI(TAG, "paired node %s", node_id);
+                }
             } else {
                 ESP_LOGW(TAG, "failed to store node %s: %s", node_id, esp_err_to_name(err));
             }
@@ -330,20 +353,14 @@ static void process_payload(const char *payload)
 static void finalize_capture_if_needed(void)
 {
     if (!s_state.capture_active || !s_state.capture_has_data) {
-        s_state.capture_active = false;
-        s_state.capture_has_data = false;
-        s_state.capture_len = 0;
-        s_state.capture_payload[0] = '\0';
+        capture_reset();
         return;
     }
 
     char payload[sizeof(s_state.capture_payload)];
     memcpy(payload, s_state.capture_payload, sizeof(payload));
 
-    s_state.capture_active = false;
-    s_state.capture_has_data = false;
-    s_state.capture_len = 0;
-    s_state.capture_payload[0] = '\0';
+    capture_reset();
 
     process_payload(payload);
 }
@@ -355,6 +372,7 @@ static void handle_uart_line(const char *line)
         s_state.capture_active = true;
         s_state.capture_has_data = false;
         s_state.capture_len = 0;
+        s_state.capture_expected_len = 0;
         s_state.capture_payload[0] = '\0';
         return;
     }
@@ -365,11 +383,16 @@ static void handle_uart_line(const char *line)
 
     if (strncmp(line, "  [", 3) == 0 || strncmp(line, "[", 1) == 0) {
         if (append_ascii_dump_chunk(line)) {
+            if (s_state.capture_expected_len > 0 &&
+                s_state.capture_len >= s_state.capture_expected_len) {
+                finalize_capture_if_needed();
+            }
             return;
         }
     }
 
     if (strncmp(line, "Receive ", 8) == 0) {
+        update_capture_expected_len(line);
         return;
     }
 
@@ -407,11 +430,8 @@ static void ack_task(void *arg)
             continue;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_HUB_PAIR_ACK_DELAY_MS));
-
-        err = sub_send_line(ACK_TEXT);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "failed to send ack payload: %s", esp_err_to_name(err));
+        if (CONFIG_HUB_PAIR_ACK_DELAY_MS > 0) {
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_HUB_PAIR_ACK_DELAY_MS));
         }
     }
 }
@@ -516,7 +536,7 @@ esp_err_t hub_pairing_start(void)
     s_state.pairing_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(CONFIG_HUB_PAIR_WINDOW_MS);
     s_state.green_until = xTaskGetTickCount() + pdMS_TO_TICKS(500);
     xSemaphoreGive(s_state.lock);
-    ESP_LOGI(TAG, "pairing mode started by software");
+    ESP_LOGI(TAG, "pairing mode started");
     return ESP_OK;
 }
 
